@@ -15,7 +15,7 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-# URL of your FIRST service (The Logger)
+# URL FIRST service (The Logger)
 # Note: It runs on port 8000
 LEARNING_EVENTS_SERVICE_URL = "http://127.0.0.1:8000"
 
@@ -35,13 +35,13 @@ def home():
     return {"message": "Concept Mastery Service is running on Port 8001"}
 
 
-# 1. Get Mastery for a User
+#  Get Mastery for a User
 @app.get("/mastery/{user_id}", response_model=List[schemas.MasteryResponse])
 def get_user_mastery(user_id: str, db: Session = Depends(get_db)):
     return crud.get_all_mastery(db, user_id)
 
 
-# 2. Get Mastery for a specific Concept
+# Get Mastery for a specific Concept
 @app.get("/mastery/{user_id}/{concept_id}", response_model=schemas.MasteryResponse)
 def get_concept_mastery(user_id: str, concept_id: str, db: Session = Depends(get_db)):
     record = crud.get_mastery(db, user_id, concept_id)
@@ -50,7 +50,7 @@ def get_concept_mastery(user_id: str, concept_id: str, db: Session = Depends(get
     return record
 
 
-# 3. Receive an Event (Webhook style) - For real-time updates
+# Receive an Event (Webhook style) - For real-time updates
 @app.post("/process_event")
 def process_event(event: schemas.EventIncoming, db: Session = Depends(get_db)):
     # Extract score safely
@@ -62,7 +62,7 @@ def process_event(event: schemas.EventIncoming, db: Session = Depends(get_db)):
     return {"status": "updated", "new_mastery": updated_record.mastery_score}
 
 
-# 4. Recompute Everything (The Advanced Feature)
+# Recompute Everything (The Advanced Feature)
 @app.post("/mastery/recompute/{user_id}")
 def recompute_mastery(user_id: str, db: Session = Depends(get_db)):
     """

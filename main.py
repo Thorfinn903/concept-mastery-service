@@ -2,12 +2,14 @@ from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 import requests  # <--- New library to talk to Service 1
-from database import engine, get_db, Base
+from database import engine, get_db, Base  # noqa: F401  (engine and get_db are used by metadata and dependencies)
 
-import db_models
+import db_models  # noqa: F401  (models are imported for SQLAlchemy metadata)
 import schemas
 import crud
-from database import engine, get_db
+
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 Base.metadata.create_all(bind=engine)
 
@@ -16,6 +18,16 @@ app = FastAPI()
 # URL of your FIRST service (The Logger)
 # Note: It runs on port 8000
 LEARNING_EVENTS_SERVICE_URL = "http://127.0.0.1:8000"
+
+
+def _make_session(retries: int = 3, backoff_factor: float = 0.5, timeout: int = 5):
+    session = requests.Session()
+    retry = Retry(total=retries, backoff_factor=backoff_factor, status_forcelist=[500, 502, 503, 504])
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    session.request = lambda *args, **kwargs: requests.Session.request(session, *args, timeout=timeout, **kwargs)
+    return session
 
 
 @app.get("/")
@@ -56,25 +68,46 @@ def recompute_mastery(user_id: str, db: Session = Depends(get_db)):
     """
     Connects to Service 1, gets all history, and recalculates mastery from scratch.
     """
+    # Build a resilient HTTP session
+    session = _make_session()
+
     # Step A: Call Service 1 API
     try:
-        response = requests.get(f"{LEARNING_EVENTS_SERVICE_URL}/events/{user_id}")
-        events = response.json()  # Convert list of events to Python list
-    except:
-        raise HTTPException(status_code=500, detail="Could not connect to Learning Events Service")
+        resp = session.get(f"{LEARNING_EVENTS_SERVICE_URL}/events/{user_id}")
+        resp.raise_for_status()
+        events = resp.json()
+        if not isinstance(events, list):
+            raise ValueError("Events payload is not a list")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not fetch events: {exc}")
 
-    # Step B: Reset current mastery for this user (Simple Logic: just loop and update)
-    # Ideally, we would wipe data first, but let's just re-process for now.
+    # Step B: Batch update within a single DB transaction where possible
+    processed = 0
+    skipped = 0
 
-    count = 0
-    for event in events:
-        # Extract data from the event list
-        e_type = event['event_type']
-        c_id = event['concept_id']
-        details = event['event_details']
-        score = details.get('score', 0)
+    try:
+        # Use the provided db session and avoid committing per event; commit once at the end
+        for ev in events:
+            # Quick validation and normalization
+            try:
+                # Allow dict-like input to be validated by Pydantic
+                incoming = schemas.EventIncoming(**ev) if isinstance(ev, dict) else None
+                if incoming is None:
+                    skipped += 1
+                    continue
+            except Exception:
+                skipped += 1
+                continue
 
-        crud.update_mastery_from_event(db, user_id, c_id, e_type, score)
-        count += 1
+            score = incoming.event_details.get("score", 0)
+            crud.update_mastery_from_event(db, incoming.user_id, incoming.concept_id, incoming.event_type, score, commit=False)
+            processed += 1
 
-    return {"message": f"Successfully reprocessed {count} events for {user_id}"}
+        # Commit once after batch
+        db.commit()
+    except Exception as exc:
+        # Rollback on any unexpected error
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed while processing events: {exc}")
+
+    return {"message": f"Successfully processed {processed} events, skipped {skipped} events for {user_id}"}

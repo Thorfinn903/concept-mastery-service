@@ -24,3 +24,13 @@ A FastAPI microservice that acts as the "Intelligence Layer" for an educational 
 1. Install dependencies:
    ```bash
    pip install -r requirements.txt
+   ```
+
+2. Run the FastAPI server:
+   ```bash
+   uvicorn main:app --reload --port 8001
+   ```
+   
+### Endpoints
+* `GET /mastery/{student_id}/{subject}` - Get the mastery score for a student in a subject.
+* `POST /recompute` - Recompute mastery scores from historical data.

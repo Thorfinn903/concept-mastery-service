@@ -12,4 +12,4 @@ class ConceptMastery(Base):
     mastery_score = Column(Float, default=0.0)
     total_attempts = Column(Integer, default=0)
     successful_attempts = Column(Integer, default=0)
-    last_updated = Column(DateTime, default=datetime.datetime.utcnow)
+    last_updated = Column(DateTime, default=datetime.datetime.now(datetime.timezone.utc))
